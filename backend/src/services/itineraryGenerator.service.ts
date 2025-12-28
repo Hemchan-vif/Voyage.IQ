@@ -1,5 +1,6 @@
 import { db } from "../config/db";
 import { FALLBACK_ITINERARY } from "../data/fallback-itinerary";
+import { enhanceItineraryWithDistance } from "./itineraryEnhancer.service";
 
 export const getItineraryOptions = async (
   destination: string,
@@ -18,20 +19,27 @@ export const getItineraryOptions = async (
   );
 
   if (!rows.length) {
-    return {
-      source: "fallback",
-      options: [
-        {
-          days: FALLBACK_ITINERARY.length,
-          estimatedCost: budget,
-          itinerary: FALLBACK_ITINERARY
-        }
-      ]
-    };
+    const fallbackPlan = {
+  days: FALLBACK_ITINERARY.length,
+  estimatedCost: budget,
+  itinerary: FALLBACK_ITINERARY
+  };
+
+const enhancedFallback = await enhanceItineraryWithDistance(fallbackPlan);
+
+return {
+  source: "fallback",
+  options: [enhancedFallback]
+  };
   }
 
-  return {
-    source: "curated",
-    options: rows
-  };
+  const enhanced = await Promise.all(
+  rows.map((p: any) => enhanceItineraryWithDistance(p))
+);
+
+return {
+  source: "curated",
+  options: enhanced
+};
+
 };

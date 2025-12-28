@@ -1,8 +1,10 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { AuthRequest } from '../types';
 import * as Itinerary from '../models/itinerary.model';
 import { getItineraryOptions } from "../services/itineraryGenerator.service";
 import {db} from '../config/db'; 
+import { enhanceItineraryWithDistance } from '../services/itineraryEnhancer.service';
+import { calculateItineraryTotals } from '../services/itineraryTotals.service';
 
 
 // create itinerary
@@ -56,30 +58,57 @@ export const getById = async (req: AuthRequest, res: Response) => {
 
 // update itinerary
 export const update = async (req: AuthRequest, res: Response) => {
-  const itinerary = await Itinerary.getItineraryById(+req.params.id);
+  try {
+    const itinerary = await Itinerary.getItineraryById(+req.params.id);
 
-  if (!itinerary) {
-    return res.status(404).json({ message: 'Not found' });
+    if (!itinerary) {
+      return res.status(404).json({ message: "Not found" });
+    }
+
+    if (itinerary.user_id !== req.user!.id) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+
+    const updatedActivities = req.body.activities
+      ? req.body.activities
+      : JSON.parse(itinerary.activities);  // because stored as JSON string
+
+    let enhancedPlan = {
+      ...itinerary,
+      ...req.body,
+      itinerary: updatedActivities
+    };
+
+
+    enhancedPlan = await enhanceItineraryWithDistance(enhancedPlan);
+
+
+    enhancedPlan = calculateItineraryTotals(enhancedPlan);
+
+
+    const finalData = {
+      destination: req.body.destination ?? itinerary.destination,
+      start_date: req.body.start_date ?? itinerary.start_date,
+      end_date: req.body.end_date ?? itinerary.end_date,
+      budget: req.body.budget ?? itinerary.budget,
+      preferences: req.body.preferences ?? itinerary.preferences,
+      activities: JSON.stringify(enhancedPlan.itinerary),   // STORE PROCESSED VERSION
+      notes: req.body.notes ?? itinerary.notes,
+      media_paths: req.body.media_paths ?? itinerary.media_paths
+    };
+
+    await Itinerary.updateItinerary(+req.params.id, finalData);
+
+    res.json({
+      message: "Updated successfully",
+      data: enhancedPlan
+    });
+
+  } catch (err) {
+    console.error("Update Error:", err);
+    res.status(500).json({ message: "Update failed" });
   }
-
-  if (itinerary.user_id !== req.user!.id) {
-    return res.status(403).json({ message: 'Forbidden' });
-  }
-
-  const finalData = {
-    destination: req.body.destination ?? itinerary.destination,
-    start_date: req.body.start_date ?? itinerary.start_date,
-    end_date: req.body.end_date ?? itinerary.end_date,
-    budget: req.body.budget ?? itinerary.budget,
-    preferences: req.body.preferences ?? itinerary.preferences,
-    activities: req.body.activities
-      ? JSON.stringify(req.body.activities)
-      : itinerary.activities,
-    notes: req.body.notes ?? itinerary.notes,
-    media_paths: req.body.media_paths ?? itinerary.media_paths
-};
-  await Itinerary.updateItinerary(+req.params.id, finalData);
-  res.json({ message: 'Updated' });
 };
 
 
