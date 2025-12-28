@@ -5,6 +5,7 @@ import { getItineraryOptions } from "../services/itineraryGenerator.service";
 import {db} from '../config/db'; 
 import { enhanceItineraryWithDistance } from '../services/itineraryEnhancer.service';
 import { calculateItineraryTotals } from '../services/itineraryTotals.service';
+import { calculateItineraryExpenses } from "../services/itineraryExpense.service";
 
 
 // create itinerary
@@ -32,8 +33,17 @@ export const create = async (req: AuthRequest, res: Response) => {
 
 // get all itineraries
 export const getAll = async (req: AuthRequest, res: Response) => {
-  const data = await Itinerary.getItinerariesByUser(req.user!.id);
-  res.json(data);
+  const data: any = await Itinerary.getItinerariesByUser(req.user!.id);
+
+const now = new Date();
+
+const result = data.map((it: any) => ({
+  ...it,
+  status: now > new Date(it.end_date) ? "COMPLETED" : "ACTIVE"
+}));
+
+res.json(result);
+
 };
 
 
@@ -52,7 +62,13 @@ export const getById = async (req: AuthRequest, res: Response) => {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
-  res.json(itinerary);
+  const now = new Date();
+const status = now > new Date(itinerary.end_date) ? "COMPLETED" : "ACTIVE";
+
+res.json({
+  ...itinerary,
+  status
+});
 };
 
 
@@ -86,7 +102,7 @@ export const update = async (req: AuthRequest, res: Response) => {
 
     enhancedPlan = calculateItineraryTotals(enhancedPlan);
 
-
+    enhancedPlan = calculateItineraryExpenses(enhancedPlan);
     const finalData = {
       destination: req.body.destination ?? itinerary.destination,
       start_date: req.body.start_date ?? itinerary.start_date,
