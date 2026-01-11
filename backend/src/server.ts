@@ -62,11 +62,66 @@ const testDatabaseConnection = async () => {
   }
 };
 
+// Lightweight startup migration: ensure users.status exists for admin dashboard stats & user management
+const ensureUserStatusColumn = async () => {
+  const dbName = process.env.DB_NAME;
+  if (!dbName) {
+    return;
+  }
+
+  try {
+    const [rows] = await pool.query(
+      "SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users' AND COLUMN_NAME = 'status'",
+      [dbName]
+    );
+
+    const count = (rows as any)?.[0]?.count ?? 0;
+    if (Number(count) > 0) {
+      return;
+    }
+
+    console.log("ℹ Adding missing column users.status (active/suspended)...");
+    await pool.query("ALTER TABLE users ADD COLUMN status ENUM('active','suspended') DEFAULT 'active'");
+    await pool.query("UPDATE users SET status = 'active' WHERE status IS NULL");
+    console.log('✓ users.status column added');
+  } catch (error) {
+    console.error('✗ Failed to ensure users.status column:', error);
+  }
+};
+
+// Ensure users.profile_picture column exists
+const ensureProfilePictureColumn = async () => {
+  const dbName = process.env.DB_NAME;
+  if (!dbName) {
+    return;
+  }
+
+  try {
+    const [rows] = await pool.query(
+      "SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users' AND COLUMN_NAME = 'profile_picture'",
+      [dbName]
+    );
+
+    const count = (rows as any)?.[0]?.count ?? 0;
+    if (Number(count) > 0) {
+      return;
+    }
+
+    console.log("ℹ Adding missing column users.profile_picture...");
+    await pool.query("ALTER TABLE users ADD COLUMN profile_picture VARCHAR(255) DEFAULT NULL");
+    console.log('✓ users.profile_picture column added');
+  } catch (error) {
+    console.error('✗ Failed to ensure users.profile_picture column:', error);
+  }
+};
+
 // Start server
 server.listen(PORT, () => {
   console.log(`\n🚀 Server is running on http://localhost:${PORT}`);
   console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}\n`);
   testDatabaseConnection();
+  ensureUserStatusColumn();
+  ensureProfilePictureColumn();
 });
 
 export default app;

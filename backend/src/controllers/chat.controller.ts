@@ -10,6 +10,7 @@ interface ChatMessage {
   message: string;
   created_at: Date;
   user_name?: string;
+  user_profile_picture?: string;
 }
 
 export class CollaborationChatController {
@@ -30,7 +31,7 @@ export class CollaborationChatController {
       }
 
       let query = `
-        SELECT cc.*, u.name as user_name, u.email as user_email
+        SELECT cc.*, u.name as user_name, u.email as user_email, u.profile_picture as user_profile_picture
         FROM collaboration_chats cc
         JOIN users u ON cc.user_id = u.id
         WHERE cc.itinerary_id = ?
@@ -50,7 +51,7 @@ export class CollaborationChatController {
 
       // Get participant info
       const [participants] = await pool.query(`
-        SELECT DISTINCT u.id, u.name, u.email
+        SELECT DISTINCT u.id, u.name, u.email, u.profile_picture
         FROM (
           SELECT user_id FROM itineraries WHERE id = ?
           UNION
@@ -93,10 +94,10 @@ export class CollaborationChatController {
 
       // Get user info
       const [users] = await pool.query(
-        `SELECT name, email FROM users WHERE id = ?`,
+        `SELECT name, email, profile_picture FROM users WHERE id = ?`,
         [userId]
       );
-      const user = (users as any[])[0];
+      const user = (users as any[])[0] || { name: 'User', email: '' };
 
       // Insert message
       const [result] = await pool.query(
@@ -112,47 +113,62 @@ export class CollaborationChatController {
         message: message.trim(),
         created_at: new Date(),
         user_name: user.name,
-        user_email: user.email
+        user_email: user.email,
+        user_profile_picture: user.profile_picture || null
       };
 
       // Broadcast to all collaborators via Socket.io
-      socketService.broadcastToItinerary(parseInt(itineraryId), 'chat_message', chatMessage);
+      try {
+        socketService.broadcastToItinerary(parseInt(itineraryId), 'chat_message', chatMessage);
+      } catch (err) {
+        console.warn('Socket broadcast failed (non-fatal):', err);
+      }
 
-      // Send notification to other collaborators
-      const [collaborators] = await pool.query(`
-        SELECT user_id FROM itinerary_collaborators 
-        WHERE itinerary_id = ? AND status = 'accepted' AND user_id != ?
-        UNION
-        SELECT user_id FROM itineraries WHERE id = ? AND user_id != ?
-      `, [itineraryId, userId, itineraryId, userId]);
+      // Send notifications to other collaborators (best-effort)
+      try {
+        const [collaborators] = await pool.query(`
+          SELECT user_id FROM itinerary_collaborators 
+          WHERE itinerary_id = ? AND status = 'accepted' AND user_id != ?
+          UNION
+          SELECT user_id FROM itineraries WHERE id = ? AND user_id != ?
+        `, [itineraryId, userId, itineraryId, userId]);
 
-      // Get itinerary info
-      const [itineraries] = await pool.query(
-        `SELECT destination FROM itineraries WHERE id = ?`,
-        [itineraryId]
-      );
-      const itinerary = (itineraries as any[])[0];
-
-      for (const collab of collaborators as any[]) {
-        // Create notification
-        await pool.query(
-          `INSERT INTO notifications (user_id, type, title, content, link)
-           VALUES (?, 'collaboration', ?, ?, ?)`,
-          [
-            collab.user_id,
-            `New message in ${itinerary.destination}`,
-            `${user.name}: ${message.substring(0, 100)}`,
-            `/itinerary/${itineraryId}/chat`
-          ]
+        const [itineraries] = await pool.query(
+          `SELECT destination FROM itineraries WHERE id = ?`,
+          [itineraryId]
         );
+        const itinerary = (itineraries as any[])[0];
+        const destination = itinerary?.destination || 'your itinerary';
 
-        // Send real-time notification
-        socketService.sendToUser(collab.user_id, 'notification', {
-          type: 'chat',
-          title: `New message in ${itinerary.destination}`,
-          content: `${user.name}: ${message.substring(0, 50)}...`,
-          itineraryId: parseInt(itineraryId)
-        });
+        for (const collab of collaborators as any[]) {
+          try {
+            await pool.query(
+              `INSERT INTO notifications (user_id, type, title, content, link)
+               VALUES (?, 'collaboration', ?, ?, ?)`,
+              [
+                collab.user_id,
+                `New message in ${destination}`,
+                `${user.name}: ${message.substring(0, 100)}`,
+                `/itinerary/${itineraryId}/chat`
+              ]
+            );
+          } catch (err) {
+            console.warn('Notification insert failed (non-fatal):', err);
+          }
+
+          try {
+            socketService.sendToUser(collab.user_id, 'notification', {
+              type: 'chat',
+              title: `New message in ${destination}`,
+              content: `${user.name}: ${message.substring(0, 50)}...`,
+              itineraryId: parseInt(itineraryId)
+            });
+          } catch (err) {
+            console.warn('Socket notification failed (non-fatal):', err);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to build/send notifications (non-fatal):', err);
       }
 
       res.status(201).json({

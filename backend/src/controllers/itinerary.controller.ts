@@ -720,7 +720,7 @@ export class ItineraryController {
         FROM itineraries i
         LEFT JOIN itinerary_collaborators ic ON i.id = ic.itinerary_id AND ic.user_id = ? AND ic.status = 'accepted'
         LEFT JOIN users u ON i.user_id = u.id
-        WHERE i.user_id = ? OR (ic.user_id = ? AND ic.status = 'accepted')
+        WHERE (i.user_id = ? OR (ic.user_id = ? AND ic.status = 'accepted'))
       `;
       const params: any[] = [req.user.id, req.user.id, req.user.id, req.user.id];
 

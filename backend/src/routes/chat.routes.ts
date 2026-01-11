@@ -7,6 +7,9 @@ const router = Router();
 // All routes require authentication
 router.use(authenticateToken);
 
+// Get unread chat counts
+router.get('/unread/counts', (req, res) => collaborationChatController.getUnreadChatCounts(req, res));
+
 // Get chat messages for an itinerary
 router.get('/:itineraryId', (req, res) => collaborationChatController.getChatMessages(req, res));
 
@@ -15,8 +18,5 @@ router.post('/:itineraryId', (req, res) => collaborationChatController.sendChatM
 
 // Delete chat message
 router.delete('/message/:messageId', (req, res) => collaborationChatController.deleteChatMessage(req, res));
-
-// Get unread chat counts
-router.get('/unread/counts', (req, res) => collaborationChatController.getUnreadChatCounts(req, res));
 
 export default router;

@@ -1,4 +1,7 @@
 import { Router, Request, Response } from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import { AuthController } from '../controllers/auth.controller';
 import { registerValidation, loginValidation } from '../middleware/validation.middleware';
 import { authenticateToken, authorizeRoles, AuthRequest } from '../middleware/auth.middleware';
@@ -6,9 +9,42 @@ import { authenticateToken, authorizeRoles, AuthRequest } from '../middleware/au
 const router = Router();
 const authController = new AuthController();
 
+// Configure multer for profile picture upload
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../../uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, `profile-${uniqueSuffix}${ext}`);
+  }
+});
+
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only images are allowed.'));
+    }
+  },
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+});
+
 router.post('/register', registerValidation, (req: Request, res: Response) => authController.register(req, res));
 router.post('/login', loginValidation, (req: Request, res: Response) => authController.login(req, res));
 router.get('/profile', authenticateToken, (req: Request, res: Response) => authController.getProfile(req as AuthRequest, res));
+router.put('/profile', authenticateToken, (req: Request, res: Response) => authController.updateProfile(req as AuthRequest, res));
+router.post('/profile/picture', authenticateToken, upload.single('profile_picture'), (req: Request, res: Response) => authController.uploadProfilePicture(req as AuthRequest, res));
+router.delete('/profile/picture', authenticateToken, (req: Request, res: Response) => authController.removeProfilePicture(req as AuthRequest, res));
+router.put('/change-password', authenticateToken, (req: Request, res: Response) => authController.changePassword(req as AuthRequest, res));
 router.get('/users', authenticateToken, authorizeRoles('Admin'), (req: Request, res: Response) => authController.getAllUsers(req as AuthRequest, res));
 
 // Admin user management routes

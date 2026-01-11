@@ -114,7 +114,8 @@ export class AuthController {
           name: user.name,
           email: user.email,
           role: user.role,
-          contact_info: user.contact_info
+          contact_info: user.contact_info,
+          profile_picture: (user as any).profile_picture
         }
       });
     } catch (error) {
@@ -131,7 +132,7 @@ export class AuthController {
       }
 
       const [users] = await pool.query(
-        'SELECT id, name, email, role, contact_info, created_at FROM users WHERE id = ?',
+        'SELECT id, name, email, role, contact_info, profile_picture, created_at FROM users WHERE id = ?',
         [req.user.id]
       );
 
@@ -144,6 +145,150 @@ export class AuthController {
     } catch (error) {
       console.error('Get profile error:', error);
       res.status(500).json({ error: 'Failed to fetch profile' });
+    }
+  }
+
+  async updateProfile(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+
+      const { name, email, contact_info } = req.body;
+
+      // Check if email is being changed and if it's already taken
+      if (email) {
+        const [existingUsers] = await pool.query(
+          'SELECT id FROM users WHERE email = ? AND id != ?',
+          [email, req.user.id]
+        );
+
+        if (Array.isArray(existingUsers) && existingUsers.length > 0) {
+          res.status(400).json({ error: 'Email already in use by another account' });
+          return;
+        }
+      }
+
+      const [result] = await pool.query(
+        'UPDATE users SET name = ?, email = ?, contact_info = ? WHERE id = ?',
+        [name, email, contact_info || null, req.user.id]
+      );
+
+      if ((result as any).affectedRows === 0) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      res.json({ message: 'Profile updated successfully' });
+    } catch (error) {
+      console.error('Update profile error:', error);
+      res.status(500).json({ error: 'Failed to update profile' });
+    }
+  }
+
+  async uploadProfilePicture(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+
+      if (!req.file) {
+        res.status(400).json({ error: 'No file uploaded' });
+        return;
+      }
+
+      const profilePicturePath = `uploads/${req.file.filename}`;
+
+      // Update user's profile picture in database
+      await pool.query(
+        'UPDATE users SET profile_picture = ? WHERE id = ?',
+        [profilePicturePath, req.user.id]
+      );
+
+      res.json({ 
+        message: 'Profile picture uploaded successfully',
+        profile_picture: profilePicturePath
+      });
+    } catch (error) {
+      console.error('Upload profile picture error:', error);
+      res.status(500).json({ error: 'Failed to upload profile picture' });
+    }
+  }
+
+  async removeProfilePicture(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+
+      // Set profile picture to null in database
+      await pool.query(
+        'UPDATE users SET profile_picture = NULL WHERE id = ?',
+        [req.user.id]
+      );
+
+      res.json({ message: 'Profile picture removed successfully' });
+    } catch (error) {
+      console.error('Remove profile picture error:', error);
+      res.status(500).json({ error: 'Failed to remove profile picture' });
+    }
+  }
+
+  async changePassword(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+
+      const { currentPassword, newPassword } = req.body;
+
+      if (!currentPassword || !newPassword) {
+        res.status(400).json({ error: 'Current password and new password are required' });
+        return;
+      }
+
+      if (newPassword.length < 6) {
+        res.status(400).json({ error: 'New password must be at least 6 characters' });
+        return;
+      }
+
+      // Get current user with password
+      const [users] = await pool.query(
+        'SELECT password FROM users WHERE id = ?',
+        [req.user.id]
+      );
+
+      if (!Array.isArray(users) || users.length === 0) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      const user = users[0] as User;
+
+      // Verify current password
+      const isValidPassword = await bcrypt.compare(currentPassword, user.password);
+      if (!isValidPassword) {
+        res.status(400).json({ error: 'Current password is incorrect' });
+        return;
+      }
+
+      // Hash new password
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      // Update password
+      await pool.query(
+        'UPDATE users SET password = ? WHERE id = ?',
+        [hashedPassword, req.user.id]
+      );
+
+      res.json({ message: 'Password changed successfully' });
+    } catch (error) {
+      console.error('Change password error:', error);
+      res.status(500).json({ error: 'Failed to change password' });
     }
   }
 
